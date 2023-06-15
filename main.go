@@ -7,13 +7,14 @@ package main
 import (
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
+
+	TTools "AnsysCSPAgentManagerService/src/tools"
 
 	"github.com/judwhite/go-svc"
 )
@@ -22,6 +23,18 @@ type program struct {
 	LogFile *os.File
 	wg      sync.WaitGroup
 	quit    chan struct{}
+}
+
+func ProcessExists(pid int) (bool, error) {
+	if runtime.GOOS == "windows" {
+		isProcessExists, err := TTools.ProcessExists_windows(pid)
+		return isProcessExists, err
+	} else if runtime.GOOS == "linux" {
+		isProcessExists, err := TTools.ProcessExists_linux(pid)
+		return isProcessExists, err
+	}
+
+	return false, nil
 }
 
 func (p *program) Init(env svc.Environment) error {
@@ -50,27 +63,49 @@ func (p *program) Init(env svc.Environment) error {
 	return nil
 }
 
-func (p *program) CheckAgentRunning() (*http.Response, error) {
-	client := &http.Client{
-		Timeout: time.Second * 5, // set a timeout of 5 seconds
-	}
-
-	resp, err := client.Get("http://localhost:9001")
-	if err != nil {
-		fmt.Printf("Error making request: %s\n", err.Error())
-
-		if pid, err := RunAgentBinaryFile(); pid != 0 && err == nil {
-			fmt.Println("RunAgentBinaryFile is ok on pid", pid)
-		} else if err != nil {
-			fmt.Printf("Error running binary file: %s\n", err.Error())
+func (p *program) StartNewAgentApp(agentManagerServiceConfigFileLocation string) {
+	fmt.Println("StartNewAgentApp - start")
+	if pid, err := RunAgentBinaryFile(); pid != 0 && err == nil {
+		fmt.Println("RunAgentBinaryFile is ok on pid", pid)
+		fmt.Println("agentManagerServiceConfigFileLocation", agentManagerServiceConfigFileLocation)
+		ok, err := TTools.WritePIDToFile(agentManagerServiceConfigFileLocation, pid)
+		fmt.Println("Save PID into agent.pid", ok, "for pid:", pid)
+		if err != nil {
+			fmt.Printf("Error writing pid data to file: %s\n", err.Error())
+			// os.Exit(1) //@DEV
 		}
+	} else if err != nil {
+		fmt.Printf("Error running binary file: %s\n", err.Error())
 	}
+	fmt.Println("StartNewAgentApp - end")
+}
 
-	return resp, err
+func (p *program) CheckAgentRunning(agentManagerServiceConfigFileLocation string) (bool, error) {
+
+	// === Check PID when agent.pid exists - start ===
+	pid, err := TTools.ReadPIDFromFile(agentManagerServiceConfigFileLocation)
+	if err != nil {
+		fmt.Printf("Error reading pid data from file: %s\n", err.Error())
+	}
+	fmt.Println("pid from file yang", pid)
+	isProcessExists, err := ProcessExists(pid)
+	if err != nil {
+		fmt.Printf("Failed to find process: %s\n", err)
+	}
+	// === Check PID when agent.pid exists - end ===
+
+	return isProcessExists, err
 }
 
 func (p *program) Start() error {
 	p.quit = make(chan struct{})
+
+	osServiceManagerAppName := "ansysCSPAgentManagerService"
+	fileName := "agent.pid"
+
+	// Set the default appData path for Linux, Windows, and macOS systems
+	var agentManagerServiceAppDataPath string = TTools.GetAnsysCSPAgentManagerServiceAppPathByAppName(osServiceManagerAppName)
+	agentManagerServiceConfigFileLocation := filepath.Join(agentManagerServiceAppDataPath, fileName)
 
 	p.wg.Add(1)
 	go func() {
@@ -79,7 +114,11 @@ func (p *program) Start() error {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 
-		p.CheckAgentRunning() // first start for agent
+		// first start for agent
+		if !TTools.FileExists(agentManagerServiceConfigFileLocation) {
+			fmt.Println("File does not exist")
+			p.StartNewAgentApp(agentManagerServiceConfigFileLocation)
+		}
 
 		for {
 			select {
@@ -88,15 +127,12 @@ func (p *program) Start() error {
 				log.Println("Hello, World! by log") // stderr
 
 				// === check if agent is running - start ===
-				// resp, err := p.CheckAgentRunning()
-				// if err != nil {
-				// 	continue // continue loop instead of exiting
-				// 	// return // exit goroutine
-				// }
-
-				// defer resp.Body.Close()
-
-				// fmt.Printf("Response status: %d\n", resp.StatusCode)
+				isAgentProcessExists, err := p.CheckAgentRunning(agentManagerServiceConfigFileLocation)
+				fmt.Println("isAgentProcessExists yang", isAgentProcessExists)
+				if err != nil || !isAgentProcessExists {
+					fmt.Printf("Failed to find process: %s\n", err)
+					p.StartNewAgentApp(agentManagerServiceConfigFileLocation)
+				}
 				// === check if agent is running - end ===
 			case <-p.quit:
 				return
@@ -155,12 +191,15 @@ func RunAgentBinaryFile() (int, error) {
 	pid := cmd.Process.Pid
 	fmt.Println("Process started with PID:", pid)
 
-	// * Wait for the process to finish, we don't need to wait for it because we don't want this process to be blocked
-	// if err := cmd.Wait(); err != nil {
-	// 	fmt.Println("Process exited with error:", err)
-	// } else {
-	// 	fmt.Println("Process exited successfully")
-	// }
+	// Use a goroutine to wait for the process to finish so we don't create a zombie process
+	go func() {
+		err := cmd.Wait()
+		if err != nil {
+			fmt.Println("Process exited with error:", err)
+		} else {
+			fmt.Println("Process exited successfully")
+		}
+	}()
 
 	return pid, nil
 }
