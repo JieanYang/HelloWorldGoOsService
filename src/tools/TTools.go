@@ -7,25 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"syscall"
 )
-
-func ProcessExists_windows(pid int) (bool, error) {
-	_, err := os.FindProcess(pid)
-	return err == nil, err
-}
-
-func ProcessExists_linux(pid int) (bool, error) {
-	err := syscall.Kill(pid, 0)
-	if err == nil {
-		return true, err
-	}
-	if err == syscall.ESRCH {
-		return false, err
-	}
-	return false, nil
-
-}
 
 func GetAnsysCSPAgentManagerServiceAppPathByAppName(osServiceManagerAppName string) string {
 	fmt.Println("GetAnsysCSPAgentManagerServiceAppPathByAppName - start")

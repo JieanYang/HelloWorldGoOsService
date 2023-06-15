@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	ProcessCheck "AnsysCSPAgentManagerService/src/ProcessCheck"
 	TTools "AnsysCSPAgentManagerService/src/tools"
 
 	"github.com/judwhite/go-svc"
@@ -23,18 +24,6 @@ type program struct {
 	LogFile *os.File
 	wg      sync.WaitGroup
 	quit    chan struct{}
-}
-
-func ProcessExists(pid int) (bool, error) {
-	if runtime.GOOS == "windows" {
-		isProcessExists, err := TTools.ProcessExists_windows(pid)
-		return isProcessExists, err
-	} else if runtime.GOOS == "linux" {
-		isProcessExists, err := TTools.ProcessExists_linux(pid)
-		return isProcessExists, err
-	}
-
-	return false, nil
 }
 
 func (p *program) Init(env svc.Environment) error {
@@ -80,7 +69,7 @@ func (p *program) StartNewAgentApp(agentManagerServiceConfigFileLocation string)
 	fmt.Println("StartNewAgentApp - end")
 }
 
-func (p *program) CheckAgentRunning(agentManagerServiceConfigFileLocation string) (bool, error) {
+func (p *program) CheckAgentRunning(agentManagerServiceConfigFileLocation string, checker ProcessCheck.ProcessChecker) (bool, error) {
 
 	// === Check PID when agent.pid exists - start ===
 	pid, err := TTools.ReadPIDFromFile(agentManagerServiceConfigFileLocation)
@@ -88,7 +77,7 @@ func (p *program) CheckAgentRunning(agentManagerServiceConfigFileLocation string
 		fmt.Printf("Error reading pid data from file: %s\n", err.Error())
 	}
 	fmt.Println("pid from file yang", pid)
-	isProcessExists, err := ProcessExists(pid)
+	isProcessExists, err := checker.ProcessExists(pid)
 	if err != nil {
 		fmt.Printf("Failed to find process: %s\n", err)
 	}
@@ -106,6 +95,20 @@ func (p *program) Start() error {
 	// Set the default appData path for Linux, Windows, and macOS systems
 	var agentManagerServiceAppDataPath string = TTools.GetAnsysCSPAgentManagerServiceAppPathByAppName(osServiceManagerAppName)
 	agentManagerServiceConfigFileLocation := filepath.Join(agentManagerServiceAppDataPath, fileName)
+
+	var checker ProcessCheck.ProcessChecker
+
+	switch runtime.GOOS {
+	case "windows":
+		checker = ProcessCheck.NewProcessChecker()
+	case "linux":
+		checker = ProcessCheck.NewProcessChecker()
+	case "darwin":
+		checker = ProcessCheck.NewProcessChecker()
+	default:
+		fmt.Printf("Unsupported operating system: %s", runtime.GOOS)
+		os.Exit(1)
+	}
 
 	p.wg.Add(1)
 	go func() {
@@ -127,7 +130,7 @@ func (p *program) Start() error {
 				log.Println("Hello, World! by log") // stderr
 
 				// === check if agent is running - start ===
-				isAgentProcessExists, err := p.CheckAgentRunning(agentManagerServiceConfigFileLocation)
+				isAgentProcessExists, err := p.CheckAgentRunning(agentManagerServiceConfigFileLocation, checker)
 				fmt.Println("isAgentProcessExists yang", isAgentProcessExists)
 				if err != nil || !isAgentProcessExists {
 					fmt.Printf("Failed to find process: %s\n", err)
