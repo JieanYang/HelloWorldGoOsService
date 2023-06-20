@@ -76,7 +76,7 @@ func (p *program) CheckAgentRunning(agentManagerServiceConfigFileLocation string
 	if err != nil {
 		fmt.Printf("Error reading pid data from file: %s\n", err.Error())
 	}
-	fmt.Println("pid from file yang", pid)
+	fmt.Println("pid from file", pid)
 	isProcessExists, err := checker.ProcessExists(pid)
 	if err != nil {
 		fmt.Printf("Failed to find process: %s\n", err)
@@ -131,7 +131,7 @@ func (p *program) Start() error {
 
 				// === check if agent is running - start ===
 				isAgentProcessExists, err := p.CheckAgentRunning(agentManagerServiceConfigFileLocation, checker)
-				fmt.Println("isAgentProcessExists yang", isAgentProcessExists)
+				fmt.Println("isAgentProcessExists", isAgentProcessExists)
 				if err != nil || !isAgentProcessExists {
 					fmt.Printf("Failed to find process: %s\n", err)
 					p.StartNewAgentApp(agentManagerServiceConfigFileLocation)
